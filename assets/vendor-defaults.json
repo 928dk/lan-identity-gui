@@ -1,0 +1,98 @@
+[
+  {
+    "keywords": ["apple", "iphone"],
+    "label": "iPhone",
+    "pattern": "iPhone",
+    "note": "iOS devices present themselves as 'iPhone' with a suffix chosen by the device"
+  },
+  {
+    "keywords": ["samsung"],
+    "label": "Samsung Android",
+    "pattern": "android-{rand8}",
+    "note": "Android devices default to android-xxxxxxxx"
+  },
+  {
+    "keywords": ["raspberry pi", "raspberrypi"],
+    "label": "Raspberry Pi",
+    "pattern": "raspberrypi",
+    "note": "stock Raspberry Pi OS hostname"
+  },
+  {
+    "keywords": ["synology"],
+    "label": "Synology",
+    "pattern": "DiskStation",
+    "note": "Synology DSM default hostname"
+  },
+  {
+    "keywords": ["qnap"],
+    "label": "QNAP",
+    "pattern": "NAS",
+    "note": "QNAP default hostname"
+  },
+  {
+    "keywords": ["espressif"],
+    "label": "ESP32/ESP8266",
+    "pattern": "ESP-{rand8}",
+    "note": "ESP-IDF default AP SSID style"
+  },
+  {
+    "keywords": ["intel", "dell", "lenovo", "hewlett", "hp", "asustek", "micro-star", "gigabyte"],
+    "label": "Windows PC",
+    "pattern": "DESKTOP-{rand7}",
+    "note": "Windows generates DESKTOP- plus seven characters"
+  },
+  {
+    "keywords": ["canon"],
+    "label": "Canon printer",
+    "pattern": "Canon-{rand8}",
+    "note": "Canon network printer default"
+  },
+  {
+    "keywords": ["brother"],
+    "label": "Brother printer",
+    "pattern": "BRW{rand8}",
+    "note": "Brother uses BRW plus the MAC without separators"
+  },
+  {
+    "keywords": ["hp inc", "hewlett packard"],
+    "label": "HP printer",
+    "pattern": "HP{rand8}",
+    "note": "HP printer default naming"
+  },
+  {
+    "keywords": ["tp-link", "tplink"],
+    "label": "TP-Link",
+    "pattern": "TP-Link-{rand8}",
+    "note": "TP-Link access point default"
+  },
+  {
+    "keywords": ["amazon"],
+    "label": "Amazon device",
+    "pattern": "Amazon-{rand8}",
+    "note": "Echo/Fire device default"
+  },
+  {
+    "keywords": ["google"],
+    "label": "Google device",
+    "pattern": "Google-Home",
+    "note": "Chromecast/Home default"
+  },
+  {
+    "keywords": ["sonos"],
+    "label": "Sonos",
+    "pattern": "Sonos-{rand8}",
+    "note": "Sonos speaker default"
+  },
+  {
+    "keywords": ["ubiquiti"],
+    "label": "Ubiquiti",
+    "pattern": "UBNT",
+    "note": "UniFi default hostname"
+  },
+  {
+    "keywords": ["xiaomi"],
+    "label": "Xiaomi",
+    "pattern": "Xiaomi-{rand8}",
+    "note": "Xiaomi IoT default"
+  }
+]

@@ -1,0 +1,53 @@
+{
+  "_source": "https://gist.github.com/w3dg/e28ac3077a85de0551388b69ca16ff9d",
+  "_author": "Greg Ercolano (w3dg)",
+  "_note": "A curated subset of that gist, kept locally so hostname suggestions work with no network at all. Categories are the gist's own; names were trimmed to valid single-label hostnames and the list is only a starting point, not a naming policy.",
+  "_license": "The gist states no licence. Only a short list of one-word names is reproduced here, with attribution, for offline suggestion; if you redistribute this project, credit Greg Ercolano and keep this block intact.",
+  "categories": {
+    "lakes": [
+      "tahoe", "erie", "ontario", "michigan", "superior", "huron", "shasta",
+      "crater", "yellowstone", "champlain", "cumberland", "crystal", "cypress",
+      "eagle", "geneva", "george", "higgins", "isabella", "kissimmee", "meade",
+      "merritt", "mono", "navajo", "okeechobee", "peck", "perry", "powell",
+      "pyramid", "redfish", "sakakawea", "salton", "sardis", "seeley",
+      "seminole", "sinclair", "spirit", "sunapee", "sutton", "texoma", "tule",
+      "walker", "walloon", "wilson", "zoar"
+    ],
+    "water": [
+      "aqueduct", "bar", "bay", "beach", "brook", "cape", "coast", "creek",
+      "culvert", "dam", "dock", "gate", "harbor", "hook", "inlet", "island",
+      "jetty", "kill", "marina", "pier", "point", "river", "shoal", "shore",
+      "sound", "stream", "trench", "wash"
+    ],
+    "planets": [
+      "mercury", "venus", "earth", "moon", "mars", "phobos", "deimos",
+      "jupiter", "metis", "adrastea", "amalthea", "thebe", "io", "europa",
+      "ganymede", "callisto", "leda", "himalia", "elara", "ananke", "carme",
+      "saturn", "atlas", "prometheus", "pandora", "janus", "mimas", "enceladus",
+      "tethys", "telesto", "calypso", "dione", "helene", "rhea", "titan",
+      "hyperion", "iapetus", "phoebe", "uranus", "cordelia", "ophelia",
+      "cressida", "desdemona", "rosalind", "belinda", "puck", "miranda",
+      "ariel", "umbriel", "titania", "oberon", "caliban", "sycorax", "prospero",
+      "setebos", "neptune", "naiad", "thalassa", "despina", "galatea",
+      "larissa", "proteus", "triton", "nereid", "pluto", "charon"
+    ],
+    "greek": [
+      "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+      "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho",
+      "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega"
+    ],
+    "simpsons": [
+      "lisa", "bart", "maggie", "homer", "marge", "millhouse", "martin",
+      "ralph", "burns", "smithers", "barney", "grampa", "flanders", "wiggum",
+      "lovejoy", "willie", "apu", "skinner", "edna", "krusty", "nelson",
+      "quimby", "brockman", "otto", "patty", "selma", "frink", "itchy",
+      "scratchy", "snowball", "stampy", "laddie", "princess", "mojo", "pinchy"
+    ],
+    "phonetic": [
+      "alpha", "bravo", "charlie", "echo", "foxtrot", "golf", "hotel", "india",
+      "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec",
+      "romeo", "sierra", "tango", "uniform", "victor", "whisky", "xray",
+      "yankee", "zulu"
+    ]
+  }
+}

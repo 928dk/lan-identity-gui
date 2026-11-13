@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""apply-identity — the narrow privileged helper behind lan-identity-gui.
+
+Runs under ``pkexec`` (or plain ``sudo``).  It does exactly one thing: set the
+MAC address and optionally the hostname of ONE named interface, bring it back
+up, wait for a usable address, read the MAC back, and report what happened as a
+single JSON line on stdout.
+
+After a hostname change it restarts the local mDNS daemon, if one is
+running, so the new name is published rather than remembered.
+
+It deliberately does not:
+
+* read a list file, decide what to rotate to, or loop
+* run a shell, or accept a command string
+* touch any interface other than the one named
+* act on more than one fixed unit (``avahi-daemon``), and only when it is
+  already running
+* write anything outside /run
+
+Anything richer belongs in the GUI, which runs unprivileged.
+
+Exit status: 0 when the identity was applied, 1 when it was not.  The JSON line
+is printed in both cases so the caller never has to parse stderr.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+
+CANONICAL_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
+HEX_RE = re.compile(r"^[0-9A-Fa-f]{12}$")
+IFACE_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,15}$")
+HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+LABEL_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")
+
+PING_TARGETS = ("1.1.1.1", "9.9.9.9", "8.8.8.8")
+HTTP_URLS = (
+    "https://connectivitycheck.gstatic.com/generate_204",
+    "https://1.1.1.1/cdn-cgi/trace",
+)
+
+STEPS: list[dict] = []
+
+
+def step(name: str, status: str, detail: str = "") -> None:
+    STEPS.append({"name": name, "status": status, "detail": detail})
+
+
+def run(argv: list[str], timeout: int = 20) -> tuple[int, str, str]:
+    try:
+        completed = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout, check=False
+        )
+        return completed.returncode, completed.stdout, completed.stderr
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, "", str(exc)
+
+
+def canonical_mac(raw: str) -> str | None:
+    """Accept colons, dashes or bare hex; return AA:BB:CC:DD:EE:FF or None."""
+    digits = re.sub(r"[^0-9A-Fa-f]", "", raw or "")
+    if not HEX_RE.match(digits):
+        return None
+    return ":".join(digits.upper()[i:i + 2] for i in range(0, 12, 2))
+
+
+def readable_hostname(raw: str) -> str | None:
+    name = "".join(raw.split()).lower()
+    if not name or not HOSTNAME_RE.match(name) or len(name) > 63:
+        return None
+    return name
+
+
+def interface_mac(iface: str) -> str | None:
+    code, out, _ = run(["ip", "-brief", "link", "show", "dev", iface], 8)
+    if code != 0:
+        return None
+    for token in out.split():
+        if CANONICAL_RE.match(token.upper()):
+            return token.upper()
+    return None
+
+
+def interface_summary(iface: str) -> str:
+    _, out, _ = run(["ip", "-brief", "addr", "show", "dev", iface], 8)
+    return out.strip().splitlines()[0] if out.strip() else f"{iface}: no address info"
+
+
+def default_route() -> str:
+    _, out, _ = run(["ip", "route", "show", "default"], 8)
+    return " ".join(out.split()) or "(none)"
+
+
+def iface_has_addr(iface: str) -> tuple[bool, str]:
+    _, out, _ = run(["ip", "-o", "addr", "show", "dev", iface], 8)
+    if not out.strip():
+        return False, f"{iface} has no addresses"
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        family, address = parts[2], parts[3]
+        if family == "inet" and not address.startswith("127."):
+            return True, address
+        if family == "inet6" and not address.startswith(("fe80", "::1")):
+            return True, address
+    return False, f"{iface} has only a link-local address (DHCP incomplete)"
+
+
+def has_carrier(iface: str) -> bool:
+    try:
+        with open(f"/sys/class/net/{iface}/carrier", "r", encoding="ascii") as handle:
+            return handle.read().strip() == "1"
+    except OSError:
+        return False
+
+
+def refresh_name_service(hostname_applied: bool) -> None:
+    """Republish a changed hostname on the local link, if a name service runs.
+
+    A restart, not a reload.  ``avahi-daemon --reload`` re-reads
+    ``/etc/resolv.conf`` and the files in ``/etc/avahi/services/`` but explicitly
+    not ``avahi-daemon.conf``, and the daemon takes the name from the system
+    hostname when it starts -- so a reload cannot publish a new name, and
+    reporting ``ok`` for one would be a step that did nothing and said it did.
+
+    Nothing here starts a service that was not already running, and nothing talks
+    to the network directly: the daemon announces on the local link, which is the
+    point of the step.  A failure is a ``warn``, never a failure of the apply:
+    the identity is already in place by the time this runs.
+    """
+    if not hostname_applied:
+        step("name service", "skipped", "hostname unchanged")
+        return
+    code, out, err = run(["systemctl", "is-active", "avahi-daemon"], 8)
+    state = out.strip()
+    if not state:
+        state = err.strip().splitlines()[-1] if err.strip() else "not available"
+    if code != 0 or state != "active":
+        step("name service", "skipped", f"avahi-daemon is {state}")
+        return
+    code, _, err = run(["systemctl", "restart", "avahi-daemon"], 30)
+    if code == 0:
+        step("name service", "ok", "avahi-daemon restarted")
+    else:
+        step("name service", "warn", err.strip() or "avahi-daemon did not restart")
+
+
+def wait_for_link(iface: str, budget: int) -> tuple[bool, str, int]:
+    started = time.monotonic()
+    while True:
+        if not has_carrier(iface):
+            reason = f"no carrier on {iface}"
+        else:
+            ready, detail = iface_has_addr(iface)
+            if ready:
+                return True, detail, int(time.monotonic() - started)
+            reason = detail
+        if time.monotonic() - started >= budget:
+            return False, f"{reason} after {budget}s", int(time.monotonic() - started)
+        time.sleep(1)
+
+
+def probe(budget: int) -> tuple[bool, str]:
+    deadline = time.monotonic() + budget
+    while time.monotonic() < deadline:
+        for target in PING_TARGETS:
+            if time.monotonic() >= deadline:
+                break
+            code, _, _ = run(["ping", "-c1", "-W2", target], 8)
+            if code == 0:
+                return True, f"icmp {target}"
+        for url in HTTP_URLS:
+            if time.monotonic() >= deadline:
+                break
+            code, out, _ = run(
+                ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}",
+                 "--connect-timeout", "6", "--max-time", "6", url], 12,
+            )
+            if code == 0 and out.strip() in ("200", "204"):
+                return True, f"http {url} ({out.strip()})"
+    return False, "no answer from icmp or http"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Set the MAC (and optionally hostname) of one interface.",
+    )
+    parser.add_argument("--interface", required=True)
+    parser.add_argument("--mac", required=True)
+    parser.add_argument("--hostname", default="")
+    parser.add_argument("--down-wait", type=int, default=10)
+    parser.add_argument(
+        "--dhcp-wait", type=int, default=60,
+        help="seconds to wait for a usable address (the lease wait); it runs "
+             "even with --no-internet-check",
+    )
+    parser.add_argument("--check-timeout", type=int, default=30)
+    parser.add_argument(
+        "--no-internet-check", action="store_true",
+        help="skip the reachability probe only; the lease wait still runs",
+    )
+    parser.add_argument("--json", action="store_true", default=True,
+                        help="accepted for compatibility; JSON is always printed")
+    args = parser.parse_args(argv)
+
+    payload: dict = {"ok": False, "mac": args.mac, "hostname": args.hostname or None,
+                     "actual_mac": None, "steps": [], "error": ""}
+
+    def finish(code: int, error: str = "") -> int:
+        payload["steps"] = STEPS
+        payload["error"] = error
+        payload["actual_mac"] = interface_mac(args.interface)
+        print(json.dumps(payload))
+        return code
+
+    if not IFACE_RE.match(args.interface):
+        return finish(1, f"invalid interface name: {args.interface!r}")
+
+    # Validate the request before probing anything: an address the kernel can
+    # never take is rejected without asking the interface for its state.
+    mac = canonical_mac(args.mac)
+    if mac is None:
+        return finish(1, f"not a MAC address: {args.mac!r}")
+    first = int(mac[:2], 16)
+    if first & 1:
+        return finish(1, f"{mac} is a multicast address; a NIC cannot take it")
+    if mac == "00:00:00:00:00:00":
+        return finish(1, f"{mac} is not assignable")
+    step("validate", "ok", mac)
+
+    if not has_carrier(args.interface) and interface_mac(args.interface) is None:
+        return finish(1, f"{args.interface} does not exist")
+
+    hostname = None
+    if args.hostname:
+        hostname = readable_hostname(args.hostname)
+        if hostname is None:
+            return finish(1, f"not a valid hostname: {args.hostname!r}")
+        step("validate hostname", "ok", hostname)
+
+    if args.down_wait < 0 or args.dhcp_wait < 1 or args.check_timeout < 1:
+        return finish(1, "waits must be positive")
+
+    code, _, err = run(["ip", "link", "set", args.interface, "down"], 15)
+    if code != 0:
+        return finish(1, f"could not bring {args.interface} down: {err.strip()}")
+    step("link down", "ok", args.interface)
+
+    if args.down_wait:
+        time.sleep(args.down_wait)
+        step("down wait", "ok", f"{args.down_wait}s")
+
+    code, _, err = run(["ip", "link", "set", args.interface, "address", mac], 15)
+    if code != 0:
+        run(["ip", "link", "set", args.interface, "up"], 15)
+        step("set MAC", "error", err.strip())
+        return finish(1, f"could not set the MAC: {err.strip()}")
+    step("set MAC", "ok", mac)
+
+    hostname_applied = False
+    if hostname:
+        code, _, err = run(["hostnamectl", "set-hostname", hostname], 20)
+        if code == 0:
+            hostname_applied = True
+            step("set hostname", "ok", hostname)
+        else:
+            # Not fatal: the MAC is already applied and the link is down.
+            step("set hostname", "warn", err.strip() or "hostnamectl failed")
+
+    code, _, err = run(["ip", "link", "set", args.interface, "up"], 15)
+    if code != 0:
+        step("link up", "error", err.strip())
+        return finish(1, f"MAC set but {args.interface} could not be brought up")
+    step("link up", "ok", args.interface)
+
+    actual = interface_mac(args.interface)
+    payload["actual_mac"] = actual
+    if actual == mac:
+        step("read back", "ok", actual or "")
+    else:
+        step(
+            "read back", "warn",
+            f"reports {actual or 'unknown'}, expected {mac} "
+            "(driver or NetworkManager may have reverted it)",
+        )
+
+    # The lease is evidence about the interface, so it is awaited and reported
+    # whether or not the reachability probe is enabled.  --no-internet-check
+    # means "do not talk to the network", not "do not look at the interface":
+    # gating this on the probe flag used to drop the lease verdict along with it,
+    # leaving no way to tell a silent apply from a successful one.
+    ready, detail, elapsed = wait_for_link(args.interface, args.dhcp_wait)
+    if not ready:
+        step("lease", "warn", detail)
+        step("diagnostics", "warn",
+             f"{interface_summary(args.interface)}; default route: {default_route()}")
+    else:
+        step("lease", "ok", f"{detail} after {elapsed}s")
+
+    # Only once the link is up, so the daemon starts against the new state, and
+    # only when a name change was asked for: nothing to report otherwise.
+    if hostname:
+        refresh_name_service(hostname_applied)
+
+    if not args.no_internet_check:
+        # Reachability only means something once the interface has an address, so
+        # a failed lease skips the probe instead of pinging from nothing.
+        if ready:
+            answered, how = probe(args.check_timeout)
+            if answered:
+                step("internet", "ok", how)
+            else:
+                step("internet", "warn", how)
+                step("diagnostics", "warn",
+                     f"{interface_summary(args.interface)}; default route: {default_route()}")
+
+    payload["ok"] = actual == mac
+    if not payload["ok"]:
+        return finish(1, "the interface did not report the requested MAC")
+    return finish(0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

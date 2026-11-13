@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LAN Identity
+GenericName=LAN identity manager
+Comment=Curate MAC addresses, suggest hostnames, rotate and apply identities
+Exec=@LAUNCH@
+Icon=network-wired
+Terminal=false
+Categories=Network;System;
+Keywords=mac;hostname;rotate;arp;identity;network;
+StartupNotify=true
